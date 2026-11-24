@@ -1,0 +1,13 @@
+客户端:
+WSL 版本: 3.0.3.0
+内核版本: 6.18.54.1-1
+Direct3D 版本: 1.611.1-81528511
+DXCore 版本: 10.0.26100.1-240331-1435.ge-release
+Windows 版本: 10.0.26200.8457
+设置文件: C:\Users\zhangwj50\AppData\Local\wslc\settings.yaml
+
+服务器:
+会话管理器版本: 3.0.3
+会话: 1
+ID        创建者 PID   显示名称
+1         33336     wslc-cli-zhangwj50

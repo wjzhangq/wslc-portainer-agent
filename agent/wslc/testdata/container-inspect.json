@@ -1,0 +1,137 @@
+[
+  {
+    "Config": {
+      "Cmd": [
+        "-m",
+        "/models/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q8_0.gguf",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+        "-ngl",
+        "99",
+        "-c",
+        "8192"
+      ],
+      "Entrypoint": [
+        "/app/llama-server"
+      ],
+      "Env": [
+        "PATH=/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "NVARCH=x86_64",
+        "NVIDIA_REQUIRE_CUDA=cuda>=12.8 brand=unknown,driver>=470,driver<471 brand=grid,driver>=470,driver<471 brand=tesla,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=vapps,driver>=470,driver<471 brand=vpc,driver>=470,driver<471 brand=vcs,driver>=470,driver<471 brand=vws,driver>=470,driver<471 brand=cloudgaming,driver>=470,driver<471 brand=unknown,driver>=535,driver<536 brand=grid,driver>=535,driver<536 brand=tesla,driver>=535,driver<536 brand=nvidia,driver>=535,driver<536 brand=quadro,driver>=535,driver<536 brand=quadrortx,driver>=535,driver<536 brand=nvidiartx,driver>=535,driver<536 brand=vapps,driver>=535,driver<536 brand=vpc,driver>=535,driver<536 brand=vcs,driver>=535,driver<536 brand=vws,driver>=535,driver<536 brand=cloudgaming,driver>=535,driver<536 brand=unknown,driver>=550,driver<551 brand=grid,driver>=550,driver<551 brand=tesla,driver>=550,driver<551 brand=nvidia,driver>=550,driver<551 brand=quadro,driver>=550,driver<551 brand=quadrortx,driver>=550,driver<551 brand=nvidiartx,driver>=550,driver<551 brand=vapps,driver>=550,driver<551 brand=vpc,driver>=550,driver<551 brand=vcs,driver>=550,driver<551 brand=vws,driver>=550,driver<551 brand=cloudgaming,driver>=550,driver<551 brand=unknown,driver>=560,driver<561 brand=grid,driver>=560,driver<561 brand=tesla,driver>=560,driver<561 brand=nvidia,driver>=560,driver<561 brand=quadro,driver>=560,driver<561 brand=quadrortx,driver>=560,driver<561 brand=nvidiartx,driver>=560,driver<561 brand=vapps,driver>=560,driver<561 brand=vpc,driver>=560,driver<561 brand=vcs,driver>=560,driver<561 brand=vws,driver>=560,driver<561 brand=cloudgaming,driver>=560,driver<561 brand=unknown,driver>=565,driver<566 brand=grid,driver>=565,driver<566 brand=tesla,driver>=565,driver<566 brand=nvidia,driver>=565,driver<566 brand=quadro,driver>=565,driver<566 brand=quadrortx,driver>=565,driver<566 brand=nvidiartx,driver>=565,driver<566 brand=vapps,driver>=565,driver<566 brand=vpc,driver>=565,driver<566 brand=vcs,driver>=565,driver<566 brand=vws,driver>=565,driver<566 brand=cloudgaming,driver>=565,driver<566",
+        "NV_CUDA_CUDART_VERSION=12.8.90-1",
+        "CUDA_VERSION=12.8.1",
+        "LD_LIBRARY_PATH=/usr/local/cuda/lib64",
+        "NVIDIA_VISIBLE_DEVICES=all",
+        "NVIDIA_DRIVER_CAPABILITIES=compute,utility",
+        "NV_CUDA_LIB_VERSION=12.8.1-1",
+        "NV_NVTX_VERSION=12.8.90-1",
+        "NV_LIBNPP_VERSION=12.3.3.100-1",
+        "NV_LIBNPP_PACKAGE=libnpp-12-8=12.3.3.100-1",
+        "NV_LIBCUSPARSE_VERSION=12.5.8.93-1",
+        "NV_LIBCUBLAS_PACKAGE_NAME=libcublas-12-8",
+        "NV_LIBCUBLAS_VERSION=12.8.4.1-1",
+        "NV_LIBCUBLAS_PACKAGE=libcublas-12-8=12.8.4.1-1",
+        "NV_LIBNCCL_PACKAGE_NAME=libnccl2",
+        "NV_LIBNCCL_PACKAGE_VERSION=2.25.1-1",
+        "NCCL_VERSION=2.25.1-1",
+        "NV_LIBNCCL_PACKAGE=libnccl2=2.25.1-1+cuda12.8",
+        "NVIDIA_PRODUCT_NAME=CUDA",
+        "LLAMA_ARG_HOST=0.0.0.0",
+        "LLAMA_ARG_PORT=8080"
+      ],
+      "Healthcheck": {
+        "Interval": null,
+        "Retries": null,
+        "StartPeriod": null,
+        "Test": [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:8080/health"
+        ],
+        "Timeout": null
+      },
+      "Image": "ghcr.nju.edu.cn/ggml-org/llama.cpp:server-cuda",
+      "Labels": {
+        "maintainer": "NVIDIA CORPORATION <cudatools@nvidia.com>",
+        "org.opencontainers.image.created": "2026-10-22T04:31:54Z",
+        "org.opencontainers.image.description": "LLM inference in C/C++",
+        "org.opencontainers.image.ref.name": "ubuntu",
+        "org.opencontainers.image.revision": "c7fc5094179bf8a9c73c18593db714f8da41a402",
+        "org.opencontainers.image.source": "https://github.com/ggml-org/llama.cpp",
+        "org.opencontainers.image.title": "llama.cpp",
+        "org.opencontainers.image.url": "https://github.com/ggml-org/llama.cpp",
+        "org.opencontainers.image.version": "b11804"
+      },
+      "StopTimeout": null,
+      "User": "",
+      "WorkingDir": "/app"
+    },
+    "Created": "2026-10-22T10:37:10.144254856Z",
+    "HostConfig": {
+      "Memory": 0,
+      "NanoCpus": 0,
+      "NetworkMode": "bridge",
+      "Ulimits": []
+    },
+    "Id": "ac3d3bff1501b395a571f2cde1f81e3f30514e77430f0b9522dd5fc4db672d39",
+    "Image": "sha256:9806c8d385d34d4806d19be5edd046aeeb5e1a923cb55a07ea043fc19c97592a",
+    "Labels": {
+      "maintainer": "NVIDIA CORPORATION <cudatools@nvidia.com>",
+      "org.opencontainers.image.created": "2026-10-22T04:31:54Z",
+      "org.opencontainers.image.description": "LLM inference in C/C++",
+      "org.opencontainers.image.ref.name": "ubuntu",
+      "org.opencontainers.image.revision": "c7fc5094179bf8a9c73c18593db714f8da41a402",
+      "org.opencontainers.image.source": "https://github.com/ggml-org/llama.cpp",
+      "org.opencontainers.image.title": "llama.cpp",
+      "org.opencontainers.image.url": "https://github.com/ggml-org/llama.cpp",
+      "org.opencontainers.image.version": "b11804"
+    },
+    "Mounts": [
+      {
+        "Destination": "/models",
+        "Name": "",
+        "ReadWrite": true,
+        "Source": "D:\\models",
+        "Type": "bind"
+      }
+    ],
+    "Name": "/wild_flinders",
+    "NetworkSettings": {
+      "Networks": {
+        "bridge": {
+          "Aliases": [],
+          "DriverOpts": {},
+          "Gateway": "172.17.0.1",
+          "IPAMConfig": null,
+          "IPAddress": "172.17.0.2",
+          "IPPrefixLen": 16,
+          "Links": [],
+          "MacAddress": "02:42:ac:11:00:02"
+        }
+      }
+    },
+    "Ports": {
+      "8080/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "9080"
+        }
+      ]
+    },
+    "State": {
+      "ExitCode": 255,
+      "FinishedAt": "2026-11-24T05:46:32.709158758Z",
+      "Health": {
+        "FailingStreak": 0,
+        "Log": [],
+        "Status": "starting"
+      },
+      "Running": false,
+      "StartedAt": "2026-10-22T10:37:10.851961036Z",
+      "Status": "exited"
+    }
+  }
+]
