@@ -37,6 +37,8 @@ go build -o dist\agent-wslc.exe .\cmd\agent
 
 `dist/` 已被忽略，不要提交二进制。
 
+推送 `v*` tag 时，GitHub Actions 会编译 `agent-wslc.exe` 并发布到对应的 Release。压缩包里是 `dist\agent-wslc.exe` 和 `scripts\install.ps1`，解压后在该目录用管理员 PowerShell 运行 `.\scripts\install.ps1`。带连字符的 tag（例如 `v1.0.0-rc1`）会标成预发布。
+
 ## 控制台运行
 
 服务和工作目录都用拥有 wslc 数据的那个 Windows 用户。证书和 `agent.log` 写到 `%ProgramData%\PortainerAgentWslc`。`AGENT_SECRET` 为空时进程拒绝启动。

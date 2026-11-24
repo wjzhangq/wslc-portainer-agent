@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Windows amd64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout Portainer CE
+        uses: actions/checkout@v4
+        with:
+          repository: portainer/portainer
+          ref: release/2.45
+          path: server-ce
+          fetch-depth: 1
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.10"
+          cache-dependency-path: agent/go.sum
+
+      - name: Test
+        working-directory: agent
+        run: go test ./wslc/
+
+      - name: Build
+        working-directory: agent
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w" -o dist/agent-wslc.exe ./cmd/agent
+
+      - name: Package
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p "package/dist" "package/scripts"
+          cp agent/dist/agent-wslc.exe package/dist/agent-wslc.exe
+          cp agent/scripts/install.ps1 package/scripts/install.ps1
+          cp agent/dist/agent-wslc.exe "agent-wslc-${TAG}-windows-amd64.exe"
+          (cd package && zip -r "../agent-wslc-${TAG}-windows-amd64.zip" dist scripts)
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          body: |
+            Windows amd64 build.
+
+            Unzip `agent-wslc-${{ github.ref_name }}-windows-amd64.zip` and, from an elevated PowerShell in that directory, run `.\scripts\install.ps1`. The script expects `dist\agent-wslc.exe` next to `scripts\`.
+          files: |
+            agent-wslc-${{ github.ref_name }}-windows-amd64.exe
+            agent-wslc-${{ github.ref_name }}-windows-amd64.zip
