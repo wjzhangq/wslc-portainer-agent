@@ -23,10 +23,121 @@ $ServiceName = "PortainerAgentWslc"
 $Dest = Join-Path $env:ProgramData $ServiceName
 $Exe = (Resolve-Path $Exe).Path
 $FirewallName = "Portainer Agent WSLC"
+# Keep in step with wslc.MinClientVersion.
+$MinWslcVersion = "3.0.3.0"
+
+function Get-WslcPath {
+    if ($env:WSLC_PATH) {
+        if (Test-Path -LiteralPath $env:WSLC_PATH) {
+            return (Resolve-Path -LiteralPath $env:WSLC_PATH).Path
+        }
+        throw @"
+WSLC_PATH 指向的文件不存在：$env:WSLC_PATH
+本 Agent 需要 WSL $MinWslcVersion 或更高。用管理员 PowerShell 安装或更新：
+  winget install --id Microsoft.WSL -e
+  wsl --update
+然后把 WSLC_PATH 设成 wslc.exe 的完整路径，或留空以使用 C:\Program Files\WSL\wslc.exe。
+"@
+    }
+    $default = "C:\Program Files\WSL\wslc.exe"
+    if (Test-Path -LiteralPath $default) {
+        return $default
+    }
+    $cmd = Get-Command wslc.exe, wslc -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) {
+        return $cmd.Source
+    }
+    throw @"
+找不到 wslc.exe。本 Agent 需要 WSL $MinWslcVersion 或更高，wslc 随该版本一起安装，默认路径是 C:\Program Files\WSL\wslc.exe。
+
+补充依赖，用管理员 PowerShell 执行：
+  winget install --id Microsoft.WSL -e
+  wsl --update
+
+装好后新开一个终端，执行 wslc version，应显示 $MinWslcVersion 或更高。
+"@
+}
+
+function Add-VersionParts([System.Collections.Generic.List[int]]$dest, [string]$text) {
+    $clean = $text.Trim()
+    if ($clean -match '(?i)^wslc\s+') {
+        $clean = $clean.Substring(5).Trim()
+    }
+    $cut = $clean.IndexOfAny([char[]]([char]'-', [char]'+'))
+    if ($cut -ge 0) {
+        $clean = $clean.Substring(0, $cut)
+    }
+    if ($clean -notmatch '^\d+(\.\d+)*$') {
+        return
+    }
+    foreach ($piece in $clean.Split('.')) {
+        $dest.Add([int]$piece)
+    }
+}
+
+function Test-VersionAtLeast([string]$Got, [string]$Min) {
+    $g = New-Object 'System.Collections.Generic.List[int]'
+    $m = New-Object 'System.Collections.Generic.List[int]'
+    Add-VersionParts $g $Got
+    Add-VersionParts $m $Min
+    if ($g.Count -eq 0) {
+        return $false
+    }
+    $n = [Math]::Max($g.Count, $m.Count)
+    for ($i = 0; $i -lt $n; $i++) {
+        $gv = 0
+        $mv = 0
+        if ($i -lt $g.Count) { $gv = [int]$g[$i] }
+        if ($i -lt $m.Count) { $mv = [int]$m[$i] }
+        if ($gv -gt $mv) { return $true }
+        if ($gv -lt $mv) { return $false }
+    }
+    return $true
+}
+
+function Assert-WslcReady {
+    $wslc = Get-WslcPath
+    $session = Join-Path (Split-Path -Parent $wslc) "wslcsession.exe"
+    if (-not (Test-Path -LiteralPath $session)) {
+        throw @"
+wslc.exe 在 $(Split-Path -Parent $wslc)，但同目录没有 wslcsession.exe。会话进程缺失，WSL 安装不完整。
+
+补充依赖，用管理员 PowerShell 重新安装或更新：
+  wsl --update
+更新后确认 $session 存在。
+"@
+    }
+    $raw = & $wslc version --format json 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0 -or -not $raw) {
+        $raw = & $wslc version 2>&1 | Out-String
+    }
+    $ver = ""
+    try {
+        $parsed = $raw | ConvertFrom-Json
+        $ver = [string]$parsed.Client.Version
+    } catch {
+        if ($raw -match '(\d+\.\d+(?:\.\d+)*)') {
+            $ver = $Matches[1]
+        }
+    }
+    if (-not (Test-VersionAtLeast $ver $MinWslcVersion)) {
+        $shown = $ver
+        if (-not $shown) { $shown = "未知" }
+        throw @"
+当前 wslc 版本是 $shown，本 Agent 需要 $MinWslcVersion 或更高。
+
+补充依赖，用管理员 PowerShell 更新 WSL：
+  wsl --update
+然后执行 wslc version 确认版本。
+"@
+    }
+    Write-Host "wslc $ver ($wslc)"
+}
 
 if (-not (Test-Path $Exe)) {
     throw "agent binary not found: $Exe"
 }
+Assert-WslcReady
 
 function Get-ProfilePath([string]$account) {
     $nt = New-Object System.Security.Principal.NTAccount($account)

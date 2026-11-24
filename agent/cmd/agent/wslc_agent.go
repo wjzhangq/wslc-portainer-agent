@@ -49,6 +49,17 @@ func runWslc(ctx context.Context, options *agent.Options) error {
 	if options.SharedSecret == "" {
 		return errors.New("AGENT_SECRET is required when WSLC=1")
 	}
+	checked, err := wslc.Preflight(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("wslc preflight failed")
+		return err
+	}
+	log.Info().
+		Str("client", checked.WSLVersion).
+		Str("manager", checked.ManagerVersion).
+		Str("kernel", checked.KernelVersion).
+		Str("settings", checked.SettingsFile).
+		Msg("wslc preflight")
 
 	hostName, err := os.Hostname()
 	if err != nil {

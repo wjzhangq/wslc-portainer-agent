@@ -29,6 +29,8 @@ go build -o dist\agent-wslc.exe .\cmd\agent
 
 证书和 `agent.log` 写在服务工作目录。`AGENT_SECRET` 为空时进程拒绝启动，原因写在 `agent.log`。
 
+监听之前还会检查 wslc：找不到 `wslc.exe`、同目录没有 `wslcsession.exe`、版本低于 3.0.3.0、`wslc info` 没有内核或会话管理器版本、或当前用户没有 `%LOCALAPPDATA%\wslc\settings.yaml`，进程都拒绝启动。失败原因和补充办法写在 `agent.log`，控制台运行时同时打在 stderr。安装脚本在停掉已有服务之前做版本和 `wslcsession.exe` 检查，不通过就不会改服务。常见补法是管理员执行 `wsl --update`（或 `winget install --id Microsoft.WSL -e`），然后用拥有容器的用户执行一次 `wslc info`。
+
 ### session 0
 
 服务在 session 0 里调用 `wslc.exe`。监听前会跑一次 `wslc ps -a`，`agent.log` 里的 `wslc ps probe` 带有 `runtime=service` 和容器数量。`runtime=console` 是控制台或计划任务。数量为 0 或探针报错时，这次服务会话没有看见用户的容器。

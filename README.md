@@ -16,9 +16,21 @@
 
 ## 依赖
 
-- Windows，已安装并能使用的 `wslc.exe`（默认 `C:\Program Files\WSL\wslc.exe`）
+- Windows，已安装并能使用的 `wslc.exe`（默认 `C:\Program Files\WSL\wslc.exe`），版本不低于 **3.0.3.0**。同目录还要有 `wslcsession.exe`
 - Go 1.26.10（`GOTOOLCHAIN=auto` 即可）
 - 与 `agent/` 同级的 Portainer CE 源码。`go.mod` 用 `replace` 指向 `../server-ce`，这份检出不进本仓库
+
+进程在监听之前会检查这几项：`wslc.exe`、旁边的 `wslcsession.exe`、客户端版本、`wslc info` 里的内核版本和会话管理器版本、以及当前用户的 `%LOCALAPPDATA%\wslc\settings.yaml`。缺任何一项都会拒绝启动，并在 `agent.log` 和控制台写明要补什么、用哪条命令补。安装脚本在改服务之前做同样的版本检查。
+
+缺 wslc 或版本过低时，用管理员 PowerShell：
+
+```powershell
+winget install --id Microsoft.WSL -e
+wsl --update
+wslc version
+```
+
+`wslc version` 应显示 `3.0.3.0` 或更高。装在其他目录时设置 `WSLC_PATH`。`wslc info` 若提示缺少虚拟机平台，启用 `VirtualMachinePlatform` 后重启，再执行一次 `wsl --update`。设置文件不存在时，用拥有容器的那个用户执行一次 `wslc info`。
 
 ```powershell
 git clone --depth 1 --branch release/2.45 https://github.com/portainer/portainer.git server-ce
