@@ -12,9 +12,12 @@ import (
 )
 
 const (
-	maxStreams     = 16
-	notFoundMarker = "找不到对象"
+	maxStreams = 16
 )
+
+// wslc uses exit code 1 for every failure, including bad flags. A missing
+// object is identified by these stable engine codes. inspect is the exception:
+// it prints an empty JSON array and does not emit an engine code.
 
 var versionPrefix = regexp.MustCompile(`^/v\d+\.\d+`)
 
@@ -76,7 +79,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Api-Version", apiVersion)
 	w.Header().Set("Ostype", "linux")
-	h.mux.ServeHTTP(w, r)
+	capture := &statusCapture{ResponseWriter: w}
+	h.mux.ServeHTTP(capture, r)
+	if capture.code == http.StatusMethodNotAllowed {
+		h.notImplemented(w, r)
+	}
 }
 
 func stripAPIVersion(path string) string {
@@ -151,11 +158,19 @@ func (h *Handler) success(w http.ResponseWriter, stdout, stderr string, code int
 		msg = "wslc exited"
 	}
 	status := http.StatusInternalServerError
-	if strings.Contains(stderr, notFoundMarker) || strings.Contains(stdout, notFoundMarker) {
+	if notFoundOutput(stdout, stderr) {
 		status = http.StatusNotFound
 	}
 	writeMessage(w, status, msg)
 	return false
+}
+
+func notFoundOutput(stdout, stderr string) bool {
+	text := stderr + "\n" + stdout
+	if strings.Contains(text, "WSLC_E_CONTAINER_NOT_FOUND") || strings.Contains(text, "WSLC_E_IMAGE_NOT_FOUND") {
+		return true
+	}
+	return strings.TrimSpace(stdout) == "[]"
 }
 
 func (h *Handler) streamText(w http.ResponseWriter, r *http.Request, args []string, format func(string) []byte) {
@@ -166,9 +181,16 @@ func (h *Handler) streamText(w http.ResponseWriter, r *http.Request, args []stri
 	}
 	defer stdout.Close()
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	flush(w)
+	headerSent := false
+	sendHeader := func() {
+		if headerSent {
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		headerSent = true
+		flush(w)
+	}
 
 	sc := bufioScanner(stdout)
 	for sc.Scan() {
@@ -182,13 +204,87 @@ func (h *Handler) streamText(w http.ResponseWriter, r *http.Request, args []stri
 		if len(payload) == 0 {
 			continue
 		}
+		sendHeader()
 		if _, err := w.Write(payload); err != nil {
 			_, _, _ = wait()
 			return
 		}
 		flush(w)
 	}
-	_, _, _ = wait()
+	stderr, code, waitErr := wait()
+	if r.Context().Err() != nil {
+		return
+	}
+	if !headerSent {
+		if errors.Is(waitErr, context.Canceled) {
+			return
+		}
+		if waitErr != nil {
+			writeMessage(w, http.StatusInternalServerError, waitErr.Error())
+			return
+		}
+		if code != 0 {
+			msg := strings.TrimSpace(stderr)
+			if msg == "" {
+				msg = "wslc exited"
+			}
+			writeMessage(w, http.StatusInternalServerError, msg)
+			return
+		}
+		sendHeader()
+		return
+	}
+	if waitErr == nil && code == 0 {
+		return
+	}
+	msg := strings.TrimSpace(stderr)
+	if msg == "" && waitErr != nil {
+		msg = waitErr.Error()
+	}
+	if msg == "" {
+		msg = "wslc exited"
+	}
+	encoded, err := json.Marshal(map[string]any{
+		"error":       msg,
+		"errorDetail": map[string]string{"message": msg},
+	})
+	if err != nil {
+		return
+	}
+	_, _ = w.Write(append(encoded, '\n'))
+	flush(w)
+}
+
+// statusCapture swallows the standard library's 405 so the handler can answer
+// with the Docker not-implemented JSON instead.
+type statusCapture struct {
+	http.ResponseWriter
+	code int
+}
+
+func (c *statusCapture) WriteHeader(code int) {
+	c.code = code
+	if code == http.StatusMethodNotAllowed {
+		return
+	}
+	c.ResponseWriter.WriteHeader(code)
+}
+
+func (c *statusCapture) Write(p []byte) (int, error) {
+	if c.code == 0 {
+		c.code = http.StatusOK
+	}
+	if c.code == http.StatusMethodNotAllowed {
+		return len(p), nil
+	}
+	return c.ResponseWriter.Write(p)
+}
+
+func (c *statusCapture) Flush() {
+	if c.code == http.StatusMethodNotAllowed {
+		return
+	}
+	flush(c.ResponseWriter)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

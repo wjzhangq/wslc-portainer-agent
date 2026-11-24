@@ -8,12 +8,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/portainer/agent"
 	"github.com/portainer/agent/crypto"
 	"github.com/portainer/agent/ghw"
 	"github.com/portainer/agent/http"
+	"github.com/portainer/agent/wslc"
 	"github.com/rs/zerolog/log"
 )
 
@@ -34,10 +36,6 @@ func runWslcAgent(options *agent.Options) error {
 }
 
 func runWslc(ctx context.Context, options *agent.Options) error {
-	if options.SharedSecret == "" {
-		return errors.New("AGENT_SECRET is required when WSLC=1")
-	}
-
 	dir, err := wslcWorkDir()
 	if err != nil {
 		return err
@@ -47,6 +45,9 @@ func runWslc(ctx context.Context, options *agent.Options) error {
 	}
 	if err := openWslcLog(dir); err != nil {
 		return err
+	}
+	if options.SharedSecret == "" {
+		return errors.New("AGENT_SECRET is required when WSLC=1")
 	}
 
 	hostName, err := os.Hostname()
@@ -73,6 +74,7 @@ func runWslc(ctx context.Context, options *agent.Options) error {
 	if err := tlsService.GenerateCertsForHost(certHost); err != nil {
 		return err
 	}
+	probeWslcSession(ctx)
 
 	return http.NewAPIServer(&http.APIServerConfig{
 		Addr:                 options.AgentServerAddr,
@@ -104,6 +106,30 @@ func openWslcLog(dir string) error {
 	}
 	log.Logger = log.Output(io.MultiWriter(os.Stderr, file))
 	return nil
+}
+
+func probeWslcSession(ctx context.Context) {
+	exec, err := wslc.NewExecutor()
+	if err != nil {
+		log.Error().Err(err).Str("runtime", agentRuntime()).Msg("wslc ps probe skipped")
+		return
+	}
+	stdout, stderr, code, err := exec.Run(ctx, "ps", "-a", "--format", "json", "--no-trunc")
+	count := 0
+	if err == nil && code == 0 {
+		if rows, decErr := wslc.DecodeNDJSONBytes([]byte(stdout)); decErr == nil {
+			count = len(rows)
+		}
+	}
+	ev := log.Info()
+	if err != nil || code != 0 {
+		ev = log.Error().Err(err)
+	}
+	ev.Str("runtime", agentRuntime()).
+		Int("exit_code", code).
+		Int("containers", count).
+		Str("stderr", strings.TrimSpace(stderr)).
+		Msg("wslc ps probe")
 }
 
 func certificateHost(bind string) string {

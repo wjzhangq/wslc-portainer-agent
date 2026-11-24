@@ -77,6 +77,13 @@ func (h *Handler) containerStats(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	q := r.URL.Query().Get("stream")
 	stream := q == "" || truthy(q)
+	if stream {
+		if err := h.acquire(r.Context()); err != nil {
+			writeMessage(w, http.StatusTooManyRequests, "wslc agent: too many streaming commands")
+			return
+		}
+		defer h.release()
+	}
 	w.Header().Set("Content-Type", "application/json")
 
 	var prev *cpuCounters

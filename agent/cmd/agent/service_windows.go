@@ -7,8 +7,17 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/rs/zerolog/log"
 	"golang.org/x/sys/windows/svc"
 )
+
+func agentRuntime() string {
+	isService, err := svc.IsWindowsService()
+	if err == nil && isService {
+		return "service"
+	}
+	return "console"
+}
 
 func runAsWindowsService(run func(context.Context) error) (bool, error) {
 	isService, err := svc.IsWindowsService()
@@ -49,6 +58,7 @@ func (h *serviceHandler) Execute(_ []string, requests <-chan svc.ChangeRequest, 
 			}
 		case err := <-done:
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error().Err(err).Msg("wslc agent stopped")
 				return false, 1
 			}
 			return false, 0

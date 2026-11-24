@@ -3,6 +3,7 @@ package wslc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -34,7 +35,7 @@ func (h *Handler) listContainers(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	writeJSON(w, http.StatusOK, filterContainers(list, r.URL.Query().Get("filters")))
 }
 
 func (h *Handler) containerListFrom(ctx context.Context, psStdout string) ([]any, error) {
@@ -81,7 +82,7 @@ func (h *Handler) inspectMany(ctx context.Context, kind string, ids []string) (m
 	stdout, stderr, code, err := h.runner.Run(ctx, args...)
 	if err == nil && code == 0 {
 		objs, perr := parseInspectArray(stdout)
-		if perr == nil {
+		if perr == nil && len(objs) > 0 {
 			return indexInspect(objs, ids), nil
 		}
 		log.Warn().Err(perr).Str("type", kind).Msg("batch inspect JSON parse failed, falling back")
@@ -90,18 +91,33 @@ func (h *Handler) inspectMany(ctx context.Context, kind string, ids []string) (m
 	}
 
 	out := map[string]map[string]any{}
+	lastStderr := strings.TrimSpace(stderr)
+	var lastErr error
 	for _, id := range ids {
 		stdout, stderr, code, err := h.runner.Run(ctx, "inspect", "--type", kind, id)
+		lastStderr = strings.TrimSpace(stderr)
 		if err != nil || code != 0 {
-			log.Warn().Err(err).Int("code", code).Str("id", id).Str("stderr", strings.TrimSpace(stderr)).Msg("inspect failed")
+			lastErr = err
+			log.Warn().Err(err).Int("code", code).Str("id", id).Str("stderr", lastStderr).Msg("inspect failed")
 			continue
 		}
 		objs, perr := parseInspectArray(stdout)
 		if perr != nil || len(objs) == 0 {
+			lastErr = perr
 			log.Warn().Err(perr).Str("id", id).Msg("inspect returned no object")
 			continue
 		}
 		out[objectID(objs[0], id)] = objs[0]
+	}
+	if len(out) == 0 {
+		msg := lastStderr
+		if msg == "" && lastErr != nil {
+			msg = lastErr.Error()
+		}
+		if msg == "" {
+			msg = "wslc inspect failed"
+		}
+		return nil, errors.New(msg)
 	}
 	return out, nil
 }

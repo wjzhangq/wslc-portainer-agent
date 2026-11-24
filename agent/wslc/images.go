@@ -45,7 +45,7 @@ func (h *Handler) listImages(w http.ResponseWriter, r *http.Request) {
 		writeMessage(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	writeJSON(w, http.StatusOK, filterImages(list, r.URL.Query().Get("filters")))
 }
 
 func imageIDs(rows []json.RawMessage) []string {

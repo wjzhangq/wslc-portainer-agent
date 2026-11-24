@@ -64,22 +64,30 @@ go run ./wslc/testhelper -secret "<AGENT_SECRET>" -url https://127.0.0.1:9001/in
 .\scripts\install.ps1 -Secret "<AGENT_SECRET>" -User $env:USERNAME -Password "<该用户的密码>"
 ```
 
-脚本把 exe 复制到 `%ProgramData%\PortainerAgentWslc`，放行 TCP 9001，授予“作为服务登录”，写入 `WSLC=1` 等环境变量，然后启动服务 `PortainerAgentWslc`。
+脚本先停掉已有的服务和同名计划任务，再把 exe 复制到 `%ProgramData%\PortainerAgentWslc`。默认 `AGENT_HOST=127.0.0.1`，不添加入站防火墙规则。然后授予“作为服务登录”，写入 `WSLC=1` 等环境变量，启动服务 `PortainerAgentWslc`。目录 ACL 只留给 SYSTEM、Administrators 和该用户。
 
-服务跑在 session 0。如果服务进程看不到当前用户的 wslc 会话，改用登录时启动的计划任务：
+服务跑在 session 0。启动时会做一次 `wslc ps -a`，结果写在 `agent.log` 的 `wslc ps probe`。如果这次看不到容器，改用登录时启动的计划任务：
 
 ```powershell
 .\scripts\install.ps1 -Secret "<AGENT_SECRET>" -User $env:USERNAME -Mode LogonTask
 ```
 
-计划任务在该用户登录后才运行。
+计划任务绑到该用户，只在他登录后运行。密钥放在同目录的 `agent.env`，不写进启动脚本。两种模式不会同时留着。
+
+要让另一台机器上的 Portainer 连接，显式放开监听和防火墙，并把来源限制到 Server 的地址：
+
+```powershell
+.\scripts\install.ps1 -Secret "<AGENT_SECRET>" -User $env:USERNAME -Password "<密码>" -ExposeLAN -RemoteAddress "<Portainer 的 IP>"
+```
 
 ## 接到 Portainer
 
 添加环境时类型选 Agent，Secret 与 `AGENT_SECRET` 相同，并跳过 TLS 校验。
 
-- Server 在另一台机器：Agent 绑定 `0.0.0.0`，地址填 `https://<本机 IP>:9001`
-- Server 和 Agent 在同一台机器、Server 自己跑在 wslc 里：地址填 `https://host.wslc.internal:9001`
+签名只覆盖 `AGENT_SECRET`，不覆盖方法、路径和 body。跳过 TLS 校验时，见过任意一个合法请求的人可以重放那两个签名头。默认只监听本机；`-ExposeLAN` 才会把 9001 暴露到网络。
+
+- Server 在另一台机器：安装时加 `-ExposeLAN -RemoteAddress <Portainer 的 IP>`，地址填 `https://<本机 IP>:9001`
+- Server 和 Agent 在同一台机器、Server 自己跑在 wslc 里：保持默认的 `127.0.0.1`，地址填 `https://host.wslc.internal:9001`
 
 环境应显示为 Docker standalone。私有镜像的 `X-Registry-Auth` 这一版不解析；需要时先用同一个 Windows 用户执行 `wslc login`。
 

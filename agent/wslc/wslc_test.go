@@ -9,8 +9,10 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -345,10 +347,16 @@ func TestParseInfoAndStoragePath(t *testing.T) {
 
 func TestRoutes(t *testing.T) {
 	h := NewHandlerWithRunner(&scripted{run: func(args []string) (string, string, int, error) {
-		if args[0] == "ps" || args[0] == "images" || args[0] == "info" {
+		switch args[0] {
+		case "ps", "images", "info":
 			return "", "", 0, nil
+		case "inspect":
+			return `[{"Id":"abc","Config":{}}]`, "", 0, nil
+		case "rm":
+			return "", "container is gone\n错误代码： WSLC_E_CONTAINER_NOT_FOUND", 1, nil
+		default:
+			return "", "无效的 signal 值", 1, nil
 		}
-		return "", "找不到对象: missing", 1, nil
 	}})
 
 	rec := httptest.NewRecorder()
@@ -393,8 +401,14 @@ func TestRoutes(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/containers/missing", nil))
-	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "找不到对象") {
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "WSLC_E_CONTAINER_NOT_FOUND") {
 		t.Fatalf("delete %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/networks", nil))
+	if rec.Code != http.StatusNotImplemented || !strings.Contains(rec.Body.String(), "not implemented: POST /networks") {
+		t.Fatalf("post networks %d %s", rec.Code, rec.Body.String())
 	}
 
 	for i := 0; i < maxStreams; i++ {
@@ -404,6 +418,16 @@ func TestRoutes(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/containers/abc/logs?follow=1", nil))
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("follow limit %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/containers/abc/stats?stream=1", nil))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("stats limit %d %s", rec.Code, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/containers/abc/stats?stream=0", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stats snapshot %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -426,6 +450,232 @@ func TestEmptyContainerList(t *testing.T) {
 	if strings.TrimSpace(getJSON(t, h, "/containers/json")) != "[]" {
 		t.Fatal("empty list was not an array")
 	}
+}
+
+func TestNotFoundIgnoresProse(t *testing.T) {
+	prose := NewHandlerWithRunner(&scripted{run: func(args []string) (string, string, int, error) {
+		return "", "找不到对象: missing", 1, nil
+	}})
+	rec := httptest.NewRecorder()
+	prose.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/containers/missing", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("prose %d %s", rec.Code, rec.Body.String())
+	}
+
+	coded := NewHandlerWithRunner(&scripted{run: func(args []string) (string, string, int, error) {
+		return "", "object missing\n错误代码： WSLC_E_CONTAINER_NOT_FOUND", 1, nil
+	}})
+	rec = httptest.NewRecorder()
+	coded.ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/containers/missing", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("engine code %d %s", rec.Code, rec.Body.String())
+	}
+
+	inspected := NewHandlerWithRunner(&scripted{run: func(args []string) (string, string, int, error) {
+		return "[]", "phrase changed", 1, nil
+	}})
+	rec = httptest.NewRecorder()
+	inspected.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/containers/missing/json", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("empty inspect %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestContainerListInspectFailure(t *testing.T) {
+	ps := readFixture(t, "testdata/ps.json")
+	h := NewHandlerWithRunner(&scripted{run: func(args []string) (string, string, int, error) {
+		if args[0] == "ps" {
+			return ps, "", 0, nil
+		}
+		return "", "inspect exploded", 1, nil
+	}})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/containers/json?all=1", nil))
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "inspect exploded") {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestContainerLabelFilter(t *testing.T) {
+	ps := readFixture(t, "testdata/ps.json")
+	inspect := readFixture(t, "testdata/container-inspect.json")
+	h := NewHandlerWithRunner(&scripted{run: func(args []string) (string, string, int, error) {
+		switch args[0] {
+		case "ps":
+			return ps, "", 0, nil
+		case "inspect":
+			return inspect, "", 0, nil
+		default:
+			t.Errorf("unexpected %v", args)
+			return "", "", 1, nil
+		}
+	}})
+	keep := "/containers/json?all=1&filters=" + url.QueryEscape(`{"label":["org.opencontainers.image.title=llama.cpp"]}`)
+	var list []map[string]any
+	if err := json.Unmarshal([]byte(getJSON(t, h, keep)), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("kept %d", len(list))
+	}
+	drop := "/containers/json?all=1&filters=" + url.QueryEscape(`{"label":["com.docker.compose.project=demo"]}`)
+	if strings.TrimSpace(getJSON(t, h, drop)) != "[]" {
+		t.Fatal("unmatched label was returned")
+	}
+	status := "/containers/json?all=1&filters=" + url.QueryEscape(`{"status":["exited"],"name":["wild_flinders"]}`)
+	if strings.TrimSpace(getJSON(t, h, status)) == "[]" {
+		t.Fatal("status and name filter dropped the container")
+	}
+}
+
+func TestImageReferenceFilter(t *testing.T) {
+	images := readFixture(t, "testdata/images.json")
+	inspect := readFixture(t, "testdata/image-inspect.json")
+	list, err := BuildImageList([]byte(images), []byte(inspect))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filterImages(list, `{"reference":["ghcr.nju.edu.cn/ggml-org/llama.cpp"]}`)) != 1 {
+		t.Fatal("reference filter")
+	}
+	for _, item := range filterImages(list, `{"dangling":["true"]}`) {
+		if len(stringList(item["RepoTags"])) != 0 {
+			t.Fatalf("dangling kept %#v", item["RepoTags"])
+		}
+	}
+}
+
+func TestPullReportsFailure(t *testing.T) {
+	failed := NewHandlerWithRunner(&scripted{stream: func(args []string) (io.ReadCloser, func() (string, int, error), error) {
+		return io.NopCloser(strings.NewReader("")), func() (string, int, error) {
+			return "no such image\n错误代码： WSLC_E_IMAGE_NOT_FOUND", 1, nil
+		}, nil
+	}})
+	rec := httptest.NewRecorder()
+	failed.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/images/create?fromImage=missing", nil))
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "WSLC_E_IMAGE_NOT_FOUND") {
+		t.Fatalf("early %d %s", rec.Code, rec.Body.String())
+	}
+
+	partial := NewHandlerWithRunner(&scripted{stream: func(args []string) (io.ReadCloser, func() (string, int, error), error) {
+		return io.NopCloser(strings.NewReader("{\"status\":\"Pulling\"}\n")), func() (string, int, error) {
+			return "denied", 1, nil
+		}, nil
+	}})
+	rec = httptest.NewRecorder()
+	partial.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/images/create?fromImage=nginx&tag=latest", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"Pulling"`) || !strings.Contains(rec.Body.String(), `"error":"denied"`) {
+		t.Fatalf("partial %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestFollowLogsHeadersBeforeOutput(t *testing.T) {
+	pr, pw := io.Pipe()
+	release := make(chan struct{})
+	h := NewHandlerWithRunner(&scripted{
+		run: func(args []string) (string, string, int, error) {
+			if args[0] == "inspect" {
+				return `[{"Config":{}}]`, "", 0, nil
+			}
+			t.Errorf("unexpected %v", args)
+			return "", "", 1, nil
+		},
+		stream: func(args []string) (io.ReadCloser, func() (string, int, error), error) {
+			return pr, func() (string, int, error) {
+				<-release
+				return "", 0, nil
+			}, nil
+		},
+	})
+	rec := httptest.NewRecorder()
+	got := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		h.ServeHTTP(&notifyWriter{ResponseWriter: rec, got: got}, httptest.NewRequest(http.MethodGet, "/containers/abc/logs?follow=1", nil))
+		close(finished)
+	}()
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("headers were not written while the container was quiet")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code %d", rec.Code)
+	}
+	if rec.Header().Get("Content-Type") != "application/vnd.docker.raw-stream" {
+		t.Fatalf("content-type %q", rec.Header().Get("Content-Type"))
+	}
+	close(release)
+	_ = pw.Close()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return")
+	}
+}
+
+func TestFollowLogsNotFound(t *testing.T) {
+	h := NewHandlerWithRunner(&scripted{
+		run: func(args []string) (string, string, int, error) {
+			return `[{"Config":{}}]`, "", 0, nil
+		},
+		stream: func(args []string) (io.ReadCloser, func() (string, int, error), error) {
+			return io.NopCloser(strings.NewReader("")), func() (string, int, error) {
+				return "object missing\n错误代码： WSLC_E_CONTAINER_NOT_FOUND", 1, nil
+			}, nil
+		},
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/containers/abc/logs?follow=1", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTTYLogsAreRaw(t *testing.T) {
+	h := NewHandlerWithRunner(&scripted{run: func(args []string) (string, string, int, error) {
+		switch args[0] {
+		case "inspect":
+			return `[{"Config":{"Tty":true}}]`, "", 0, nil
+		case "logs":
+			return "hello\n", "", 0, nil
+		default:
+			t.Errorf("unexpected %v", args)
+			return "", "", 1, nil
+		}
+	}})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/containers/abc/logs", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "hello\n" {
+		t.Fatalf("tty %d %q", rec.Code, rec.Body.String())
+	}
+
+	plain := NewHandlerWithRunner(&scripted{run: func(args []string) (string, string, int, error) {
+		switch args[0] {
+		case "inspect":
+			return `[{"Config":{"Tty":false}}]`, "", 0, nil
+		case "logs":
+			return "hello\n", "", 0, nil
+		default:
+			return "", "", 1, nil
+		}
+	}})
+	rec = httptest.NewRecorder()
+	plain.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/containers/abc/logs", nil))
+	if rec.Code != http.StatusOK || len(rec.Body.Bytes()) == 0 || rec.Body.Bytes()[0] != stdoutStream {
+		t.Fatalf("mux %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+type notifyWriter struct {
+	http.ResponseWriter
+	got  chan struct{}
+	once sync.Once
+}
+
+func (n *notifyWriter) WriteHeader(code int) {
+	n.ResponseWriter.WriteHeader(code)
+	n.once.Do(func() { close(n.got) })
 }
 
 type scripted struct {

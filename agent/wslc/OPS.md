@@ -25,30 +25,32 @@ go build -o dist\agent-wslc.exe .\cmd\agent
 .\scripts\install.ps1 -Secret "<与 Portainer 里填写的相同>" -User "zhangwj50" -Password "<密码>"
 ```
 
-脚本会复制 exe 到 `%ProgramData%\PortainerAgentWslc`，放行 TCP 9001，授予“作为服务登录”，把 `WSLC=1`、`AGENT_SECRET`、`AGENT_PORT=9001`、`AGENT_HOST=0.0.0.0`、`LOG_LEVEL=INFO` 写进服务的 `Environment`，然后启动服务。
+脚本先停掉已有服务和同名计划任务，再复制 exe 到 `%ProgramData%\PortainerAgentWslc`。默认 `AGENT_HOST=127.0.0.1`，不放行入站 9001。授予“作为服务登录”，把 `WSLC=1`、`AGENT_SECRET`、`AGENT_PORT=9001`、`AGENT_HOST`、`LOG_LEVEL=INFO` 写进服务的 `Environment`，然后启动服务。目录 ACL 只保留 SYSTEM、Administrators 和该用户。
 
-证书和 `agent.log` 写在服务工作目录。`AGENT_SECRET` 为空时进程拒绝启动。
+证书和 `agent.log` 写在服务工作目录。`AGENT_SECRET` 为空时进程拒绝启动，原因写在 `agent.log`。
 
 ### session 0
 
-服务在 session 0 里调用 `wslc.exe`，能否连上交互会话里的会话 VM 还没有在这台机器上装成服务验证过。验收方法：服务起来之后，带签名访问 `/containers/json`，应当能看到 `wild_flinders`。
+服务在 session 0 里调用 `wslc.exe`。监听前会跑一次 `wslc ps -a`，`agent.log` 里的 `wslc ps probe` 带有 `runtime=service` 和容器数量。`runtime=console` 是控制台或计划任务。数量为 0 或探针报错时，这次服务会话没有看见用户的容器。
 
-如果看不到，改用登录时启动的计划任务（跑在用户会话里，重启后要有人登录才会起来）：
+验收方法：服务起来之后，带签名访问 `/containers/json`，应当能看到 `wild_flinders`。
+
+如果看不到，改用登录时启动的计划任务（跑在该用户会话里，重启后要有人登录才会起来）。密钥写在仅该用户可读的 `agent.env`，不进启动脚本：
 
 ```powershell
 .\scripts\install.ps1 -Secret "<secret>" -User "zhangwj50" -Mode LogonTask
 ```
 
-开发时也可以不装服务，在控制台直接跑（先设好同样的环境变量）。两种跑法走同一套启动代码。
+开发时也可以不装服务，在控制台直接跑（先设好同样的环境变量）。两种跑法走同一套启动代码。换模式重装时，脚本会删掉另一种。
 
 ## 接入 Portainer
 
 先在本机确认 `https://127.0.0.1:9001/ping` 返回 204。`/ping` 不需要签名。`/info` 和 `/containers/json` 没有合法签名时必须是 403。
 
-- 远程：Server 在另一台机器，Agent 绑 `0.0.0.0`，地址填 `https://<这台机器的 IP>:9001`。
-- 同机：Server 自己用 wslc 跑，地址填 `https://host.wslc.internal:9001`。容器端口默认只绑 `127.0.0.1`，局域网访问 9443 需要 `-p 0.0.0.0:9443:9443`。
+- 远程：安装时加 `-ExposeLAN -RemoteAddress <Portainer 的 IP>`。Agent 绑 `0.0.0.0`，防火墙只接受该地址，环境地址填 `https://<这台机器的 IP>:9001`。
+- 同机：Server 自己用 wslc 跑，保持默认 `127.0.0.1`，地址填 `https://host.wslc.internal:9001`。容器端口默认只绑 `127.0.0.1`，局域网访问 9443 需要 `-p 0.0.0.0:9443:9443`。
 
-添加环境时类型选 Agent，Secret 与 `AGENT_SECRET` 相同，并跳过 TLS 校验（证书是启动时自签的）。环境应显示为 Docker standalone。`/agents` 返回 503 是 standalone 的正常结果。`/browse/ls` 返回 404。
+添加环境时类型选 Agent，Secret 与 `AGENT_SECRET` 相同，并跳过 TLS 校验（证书是启动时自签的）。签名内容只有共享密钥，不包含请求的方法、路径和 body。跳过校验时，截到过任意一个合法请求的人可以重放签名头。环境应显示为 Docker standalone。`/agents` 返回 503 是 standalone 的正常结果。`/browse/ls` 返回 404。
 
 ## 行为说明
 
